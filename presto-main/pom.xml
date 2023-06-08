@@ -474,6 +474,11 @@
             <artifactId>ratis-common</artifactId>
             <optional>true</optional>
         </dependency>
+
+        <dependency>
+            <groupId>org.crac</groupId>
+            <artifactId>crac</artifactId>
+        </dependency>
     </dependencies>
 
     <build>

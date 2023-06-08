@@ -39,6 +39,8 @@ import com.google.common.collect.ImmutableSortedSet;
 import com.google.common.collect.SetMultimap;
 import com.google.common.collect.Sets;
 import com.google.common.collect.Sets.SetView;
+import org.crac.Context;
+import org.crac.Resource;
 import org.weakref.jmx.Managed;
 
 import javax.annotation.PostConstruct;
@@ -81,7 +83,7 @@ import static java.util.concurrent.Executors.newSingleThreadScheduledExecutor;
 
 @ThreadSafe
 public final class DiscoveryNodeManager
-        implements InternalNodeManager
+        implements InternalNodeManager, org.crac.Resource
 {
     private static final Logger log = Logger.get(DiscoveryNodeManager.class);
 
@@ -93,12 +95,13 @@ public final class DiscoveryNodeManager
     private final ConcurrentHashMap<String, RemoteNodeState> nodeStates = new ConcurrentHashMap<>();
     private final HttpClient httpClient;
     private final DriftClient<ThriftServerInfoClient> driftClient;
-    private final ScheduledExecutorService nodeStateUpdateExecutor;
+    private ScheduledExecutorService nodeStateUpdateExecutor;
     private final ExecutorService nodeStateEventExecutor;
     private final boolean httpsRequired;
-    private final InternalNode currentNode;
+    private InternalNode currentNode;
     private final CommunicationProtocol protocol;
     private final boolean isMemoizeDeadNodesEnabled;
+    private final NodeInfo nodeInfo;
 
     @GuardedBy("this")
     private SetMultimap<ConnectorId, InternalNode> activeNodesByConnectorId;
@@ -147,6 +150,7 @@ public final class DiscoveryNodeManager
         this.nodeStateUpdateExecutor = newSingleThreadScheduledExecutor(threadsNamed("node-state-poller-%s"));
         this.nodeStateEventExecutor = newCachedThreadPool(threadsNamed("node-state-events-%s"));
         this.httpsRequired = internalCommunicationConfig.isHttpsRequired();
+        this.nodeInfo = requireNonNull(nodeInfo, "nodeInfo is null");
 
         this.currentNode = findCurrentNode(
                 serviceSelector.selectAllServices(),
@@ -607,5 +611,55 @@ public final class DiscoveryNodeManager
         }
 
         return service -> isResourceManager(service) || isCatalogServer(service);
+    }
+
+    @Override
+    public void beforeCheckpoint(Context<? extends Resource> context) throws Exception
+    {
+        nodeStateUpdateExecutor.shutdownNow();
+    }
+
+    @Override
+    public void afterRestore(Context<? extends Resource> context) throws Exception
+    {
+        restoreCurrentNode();
+        restoreNodeInfo();
+        restoreNodeStatusExecutor();
+    }
+
+    private void restoreNodeStatusExecutor()
+    {
+        this.nodeStateUpdateExecutor = newSingleThreadScheduledExecutor(threadsNamed("node-state-poller-%s"));
+        nodeStateUpdateExecutor.scheduleWithFixedDelay(() -> {
+            try {
+                pollWorkers();
+            }
+            catch (Exception e) {
+                log.error(e, "Error polling state of nodes");
+            }
+        }, 5, 5, TimeUnit.SECONDS);
+        pollWorkers();
+    }
+
+    private void restoreCurrentNode()
+    {
+        this.currentNode = findCurrentNode(
+                serviceSelector.selectAllServices(),
+                requireNonNull(nodeInfo, "nodeInfo is null").getNodeId(),
+                expectedNodeVersion,
+                httpsRequired);
+    }
+
+    private void restoreNodeInfo()
+    {
+        activeNodesByConnectorId = null;
+        nodesByConnectorId = null;
+        connectorIdsByNodeId = null;
+        nodes = null;
+        allNodes = null;
+        coordinators = null;
+        resourceManagers = null;
+        catalogServers = null;
+        refreshNodesInternal();
     }
 }
