@@ -37,6 +37,8 @@ import com.google.common.collect.Ordering;
 import com.google.common.util.concurrent.ListenableFuture;
 import io.airlift.units.DataSize;
 import io.airlift.units.Duration;
+import org.crac.Context;
+import org.crac.Core;
 import org.jheaps.annotations.VisibleForTesting;
 import org.weakref.jmx.Flatten;
 import org.weakref.jmx.Managed;
@@ -77,7 +79,7 @@ import static java.util.Objects.requireNonNull;
 
 @ThreadSafe
 public class SqlQueryManager
-        implements QueryManager
+        implements QueryManager, org.crac.Resource
 {
     private static final Logger log = Logger.get(SqlQueryManager.class);
 
@@ -91,12 +93,14 @@ public class SqlQueryManager
     private final long maxQueryOutputPositions;
     private final DataSize maxQueryOutputSize;
 
-    private final ScheduledExecutorService queryManagementExecutor;
-    private final ThreadPoolExecutorMBean queryManagementExecutorMBean;
+    private ScheduledExecutorService queryManagementExecutor;
+    private ThreadPoolExecutorMBean queryManagementExecutorMBean;
 
     private final QueryManagerStats stats = new QueryManagerStats();
 
     private final HistoryBasedPlanStatisticsTracker historyBasedPlanStatisticsTracker;
+
+    private final QueryManagerConfig queryManagerConfig;
 
     @Inject
     public SqlQueryManager(
@@ -116,6 +120,7 @@ public class SqlQueryManager
         this.maxQueryScanPhysicalBytes = queryManagerConfig.getQueryMaxScanRawInputBytes();
         this.maxQueryOutputPositions = queryManagerConfig.getQueryMaxOutputPositions();
         this.maxQueryOutputSize = queryManagerConfig.getQueryMaxOutputSize();
+        this.queryManagerConfig = queryManagerConfig;
 
         this.queryManagementExecutor = Executors.newScheduledThreadPool(queryManagerConfig.getQueryManagerExecutorPoolSize(), threadsNamed("query-management-%s"));
         this.queryManagementExecutorMBean = new ThreadPoolExecutorMBean((ThreadPoolExecutor) queryManagementExecutor);
@@ -123,12 +128,18 @@ public class SqlQueryManager
         this.queryTracker = new QueryTracker<>(queryManagerConfig, queryManagementExecutor, clusterQueryTrackerService);
         requireNonNull(historyBasedPlanStatisticsManager, "historyBasedPlanStatisticsManager is null");
         this.historyBasedPlanStatisticsTracker = historyBasedPlanStatisticsManager.getHistoryBasedPlanStatisticsTracker();
+        Core.getGlobalContext().register(this);
     }
 
     @PostConstruct
     public void start()
     {
         queryTracker.start();
+        startQueryManagement();
+    }
+
+    private void startQueryManagement()
+    {
         queryManagementExecutor.scheduleWithFixedDelay(() -> {
             try {
                 enforceMemoryLimits();
@@ -447,5 +458,19 @@ public class SqlQueryManager
                 query.fail(new ExceededOutputSizeLimitException(limit));
             }
         }
+    }
+
+    @Override
+    public void beforeCheckpoint(Context<? extends org.crac.Resource> context) throws Exception
+    {
+        queryManagementExecutor.shutdownNow();
+    }
+
+    @Override
+    public void afterRestore(Context<? extends org.crac.Resource> context) throws Exception
+    {
+        this.queryManagementExecutor = Executors.newScheduledThreadPool(queryManagerConfig.getQueryManagerExecutorPoolSize(), threadsNamed("query-management-%s"));
+        this.queryManagementExecutorMBean = new ThreadPoolExecutorMBean((ThreadPoolExecutor) queryManagementExecutor);
+        startQueryManagement();
     }
 }

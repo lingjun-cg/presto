@@ -261,6 +261,8 @@ public class NodeScheduler
                 allNodes = activeNodes;
             }
 
+            allNodes.forEach((n) -> System.out.println("[selectExactNodes] get node : " + n));
+
             Set<String> coordinatorNodeIds = nodeManager.getCoordinators().stream()
                     .map(InternalNode::getNodeIdentifier)
                     .collect(toImmutableSet());

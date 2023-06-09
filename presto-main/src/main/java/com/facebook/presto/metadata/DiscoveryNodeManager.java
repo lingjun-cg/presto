@@ -40,6 +40,7 @@ import com.google.common.collect.SetMultimap;
 import com.google.common.collect.Sets;
 import com.google.common.collect.Sets.SetView;
 import org.crac.Context;
+import org.crac.Core;
 import org.crac.Resource;
 import org.weakref.jmx.Managed;
 
@@ -161,6 +162,7 @@ public final class DiscoveryNodeManager
         this.isMemoizeDeadNodesEnabled = internalCommunicationConfig.isMemoizeDeadNodesEnabled();
 
         refreshNodesInternal();
+        Core.getGlobalContext().register(this);
     }
 
     private static InternalNode findCurrentNode(List<ServiceDescriptor> allServices, String currentNodeId, NodeVersion expectedNodeVersion, boolean httpsRequired)
