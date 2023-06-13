@@ -47,6 +47,9 @@ import com.google.common.collect.Streams;
 import com.google.common.io.Closer;
 import io.airlift.units.DataSize;
 import io.airlift.units.Duration;
+import org.crac.Context;
+import org.crac.Core;
+import org.crac.Resource;
 import org.weakref.jmx.JmxException;
 import org.weakref.jmx.MBeanExporter;
 import org.weakref.jmx.Managed;
@@ -105,7 +108,7 @@ import static java.util.function.Function.identity;
 import static org.weakref.jmx.ObjectNames.generatedNameOf;
 
 public class ClusterMemoryManager
-        implements ClusterMemoryPoolManager
+        implements ClusterMemoryPoolManager, Resource
 {
     private static final Logger log = Logger.get(ClusterMemoryManager.class);
 
@@ -201,6 +204,7 @@ public class ClusterMemoryManager
                 "Soft max query total memory cannot be greater than hard limit");
 
         this.pools = createClusterMemoryPools(nodeMemoryConfig.isReservedPoolEnabled());
+        Core.getGlobalContext().register(this);
     }
 
     private Map<MemoryPoolId, ClusterMemoryPool> createClusterMemoryPools(boolean reservedPoolEnabled)
@@ -567,6 +571,7 @@ public class ClusterMemoryManager
         // Add new nodes
         for (InternalNode node : aliveNodes) {
             if (!nodes.containsKey(node.getNodeIdentifier())) {
+                System.out.println("com.facebook.presto.memory.ClusterMemoryManager.updateNodes node:" + node);
                 nodes.put(
                         node.getNodeIdentifier(),
                         new RemoteNodeMemory(
@@ -685,5 +690,19 @@ public class ClusterMemoryManager
     public long getQueriesKilledDueToOutOfMemory()
     {
         return queriesKilledDueToOutOfMemory.get();
+    }
+
+    @Override
+    public void beforeCheckpoint(Context<? extends Resource> context) throws Exception
+    {
+    }
+
+    @Override
+    public void afterRestore(Context<? extends Resource> context) throws Exception
+    {
+        //nodes中保留的RemoteNodeMemory中引用的node会由于ip变化无效
+        //清除掉以后,当SqlQueryManager在恢复时调用com.facebook.presto.memory.ClusterMemoryManager.process
+        //会再重新创建nodes.
+        nodes.clear();
     }
 }

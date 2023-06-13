@@ -464,6 +464,8 @@ public class SqlQueryManager
     public void beforeCheckpoint(Context<? extends org.crac.Resource> context) throws Exception
     {
         queryManagementExecutor.shutdownNow();
+        //确保线程池中没有线程在运行,如果有的话,在恢复以后继续运行会引用一些包括不正确IP的Node
+        queryManagementExecutor.awaitTermination(30, TimeUnit.SECONDS);
     }
 
     @Override

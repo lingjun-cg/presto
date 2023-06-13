@@ -230,6 +230,7 @@ public final class DiscoveryNodeManager
 
         // Add new nodes
         for (InternalNode node : aliveNodes) {
+            System.out.println("pollWorkers with node : " + node);
             switch (protocol) {
                 case HTTP:
                     nodeStates.putIfAbsent(node.getNodeIdentifier(),
@@ -296,6 +297,7 @@ public final class DiscoveryNodeManager
         }
 
         for (ServiceDescriptor service : services) {
+            System.out.println("refreshNodesInternal[1] service location" + service.getLocation());
             URI uri = getHttpUri(service, httpsRequired);
             OptionalInt thriftPort = getThriftServerPort(service);
             NodeVersion nodeVersion = getNodeVersion(service);
@@ -390,6 +392,7 @@ public final class DiscoveryNodeManager
                 catalogServersBuilder.build());
         // only update if all nodes actually changed (note: this does not include the connectors registered with the nodes)
         if (!allNodes.equals(this.allNodes)) {
+            allNodes.getActiveNodes().forEach((n) -> System.out.println("refreshNodesInternal[2] active node: " + n));
             // assign allNodes to a local variable for use in the callback below
             this.allNodes = allNodes;
             coordinators = coordinatorsBuilder.build();
@@ -399,6 +402,9 @@ public final class DiscoveryNodeManager
             // notify listeners
             List<Consumer<AllNodes>> listeners = ImmutableList.copyOf(this.listeners);
             nodeStateEventExecutor.submit(() -> listeners.forEach(listener -> listener.accept(allNodes)));
+        }
+        else {
+            allNodes.getActiveNodes().forEach((n) -> System.out.println("refreshNodesInternal[3] active node: " + n));
         }
     }
 
@@ -619,6 +625,7 @@ public final class DiscoveryNodeManager
     public void beforeCheckpoint(Context<? extends Resource> context) throws Exception
     {
         nodeStateUpdateExecutor.shutdownNow();
+        nodeStateUpdateExecutor.awaitTermination(30, TimeUnit.SECONDS);
     }
 
     @Override
@@ -662,6 +669,7 @@ public final class DiscoveryNodeManager
         coordinators = null;
         resourceManagers = null;
         catalogServers = null;
+        nodeStates.clear();
         refreshNodesInternal();
     }
 }

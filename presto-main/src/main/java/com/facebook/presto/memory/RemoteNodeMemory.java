@@ -27,6 +27,9 @@ import com.facebook.presto.server.smile.BaseResponse;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 import io.airlift.units.Duration;
+import org.crac.Context;
+import org.crac.Core;
+import org.crac.Resource;
 
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
@@ -38,6 +41,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static com.facebook.airlift.http.client.HttpStatus.OK;
+import static com.facebook.airlift.http.client.HttpUriBuilder.uriBuilderFrom;
 import static com.facebook.airlift.http.client.JsonBodyGenerator.jsonBodyGenerator;
 import static com.facebook.airlift.http.client.Request.Builder.preparePost;
 import static com.facebook.presto.server.RequestHelpers.setContentTypeHeaders;
@@ -51,12 +55,13 @@ import static java.util.concurrent.TimeUnit.SECONDS;
 
 @ThreadSafe
 public class RemoteNodeMemory
+        implements org.crac.Resource
 {
     private static final Logger log = Logger.get(RemoteNodeMemory.class);
 
     private final InternalNode node;
     private final HttpClient httpClient;
-    private final URI memoryInfoUri;
+    private URI memoryInfoUri;
     private final Codec<MemoryInfo> memoryInfoCodec;
     private final Codec<MemoryPoolAssignmentsRequest> assignmentsRequestCodec;
     private final AtomicReference<Optional<MemoryInfo>> memoryInfo = new AtomicReference<>(Optional.empty());
@@ -80,6 +85,8 @@ public class RemoteNodeMemory
         this.memoryInfoCodec = requireNonNull(memoryInfoCodec, "memoryInfoCodec is null");
         this.assignmentsRequestCodec = requireNonNull(assignmentsRequestCodec, "assignmentsRequestCodec is null");
         this.isBinaryTransportEnabled = isBinaryTransportEnabled;
+        Core.getGlobalContext().register(this);
+        System.out.println("com.facebook.presto.memory.RemoteNodeMemory.RemoteNodeMemory with node" + node);
     }
 
     public long getCurrentAssignmentVersion()
@@ -160,5 +167,26 @@ public class RemoteNodeMemory
             return smileBodyGenerator((SmileCodec<MemoryPoolAssignmentsRequest>) assignmentsRequestCodec, assignments);
         }
         return jsonBodyGenerator((JsonCodec<MemoryPoolAssignmentsRequest>) assignmentsRequestCodec, assignments);
+    }
+
+    @Override
+    public void beforeCheckpoint(Context<? extends Resource> context) throws Exception
+    {
+    }
+
+    @Override
+    public void afterRestore(Context<? extends Resource> context) throws Exception
+    {
+        // java.lang.IllegalArgumentException: value is negative
+        // at io.airlift.units.Preconditions.checkArgument(Preconditions.java:26)
+        // at io.airlift.units.Duration.<init>(Duration.java:69)
+        // at io.airlift.units.Duration.succinctDuration(Duration.java:59)
+        // at io.airlift.units.Duration.succinctNanos(Duration.java:54)
+        // at io.airlift.units.Duration.nanosSince(Duration.java:49)
+        // at com.facebook.presto.memory.RemoteNodeMemory.asyncRefresh(RemoteNodeMemory.java:102)
+        // 原因是不同机器的时间不一样,重新设置避免出现异常
+        lastUpdateNanos.set(System.nanoTime());
+        memoryInfoUri = uriBuilderFrom(node.getInternalUri())
+                .appendPath("/v1/memory").build();
     }
 }
